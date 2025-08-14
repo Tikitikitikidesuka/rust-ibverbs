@@ -1869,7 +1869,7 @@ impl QueuePair {
         wr_id: u64,
         imm_data: Option<u32>,
     ) -> io::Result<()> {
-        let mut __bindgen_anon_1: ibv_send_wr__bindgen_ty_1 = Default::default();
+        let mut __bindgen_anon_1: ffi::ibv_send_wr__bindgen_ty_1 = Default::default();
 
         let opcode = match imm_data {
             Some(imm_data) => {
