@@ -1863,17 +1863,32 @@ impl QueuePair {
     ///
     /// [1]: http://www.rdmamojo.com/2013/01/26/ibv_post_send/
     #[inline]
-    pub unsafe fn post_send(&mut self, local: &[LocalMemorySlice], wr_id: u64) -> io::Result<()> {
+    pub unsafe fn post_send(
+        &mut self,
+        local: &[LocalMemorySlice],
+        wr_id: u64,
+        imm_data: Option<u32>,
+    ) -> io::Result<()> {
+        let mut __bindgen_anon_1: ibv_send_wr__bindgen_ty_1 = Default::default();
+
+        let opcode = match imm_data {
+            Some(imm_data) => {
+                __bindgen_anon_1.imm_data = imm_data.to_be();
+                ffi::ibv_wr_opcode::IBV_WR_SEND_WITH_IMM
+            }
+            None => ffi::ibv_wr_opcode::IBV_WR_SEND,
+        };
+
         let mut wr = ffi::ibv_send_wr {
             wr_id,
             next: ptr::null::<ffi::ibv_send_wr>() as *mut _,
             sg_list: local.as_ptr() as *mut ffi::ibv_sge,
             num_sge: local.len() as i32,
-            opcode: ffi::ibv_wr_opcode::IBV_WR_SEND,
+            opcode,
             send_flags: ffi::ibv_send_flags::IBV_SEND_SIGNALED.0,
             wr: Default::default(),
             qp_type: Default::default(),
-            __bindgen_anon_1: Default::default(),
+            __bindgen_anon_1,
             __bindgen_anon_2: Default::default(),
         };
         let mut bad_wr: *mut ffi::ibv_send_wr = ptr::null::<ffi::ibv_send_wr>() as *mut _;
