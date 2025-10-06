@@ -1486,16 +1486,15 @@ impl PreparedQueuePair {
 }
 
 /// A memory region that has been registered for use with RDMA.
-pub struct MemoryRegion<T> {
+pub struct MemoryRegion {
     _pd: Arc<ProtectionDomainInner>,
     mr: *mut ffi::ibv_mr,
-    data: T,
 }
 
-unsafe impl<T> Send for MemoryRegion<T> {}
-unsafe impl<T> Sync for MemoryRegion<T> {}
+unsafe impl Send for MemoryRegion {}
+unsafe impl Sync for MemoryRegion {}
 
-impl<T> MemoryRegion<T> {
+impl MemoryRegion {
     /// Get the remote authentication key used to allow direct remote access to this memory region.
     pub fn rkey(&self) -> RemoteKey {
         RemoteKey {
@@ -1510,11 +1509,6 @@ impl<T> MemoryRegion<T> {
             len: unsafe { *self.mr }.length,
             rkey: unsafe { *self.mr }.rkey,
         }
-    }
-
-    /// Get inner data.
-    pub fn inner(&mut self) -> &mut T {
-        &mut self.data
     }
 
     /// Make a subslice of this memory region.
@@ -1603,7 +1597,7 @@ pub struct RemoteKey {
     pub key: u32,
 }
 
-impl<T> Drop for MemoryRegion<T> {
+impl Drop for MemoryRegion {
     fn drop(&mut self) {
         let errno = unsafe { ffi::ibv_dereg_mr(self.mr) };
         if errno != 0 {
@@ -1701,11 +1695,16 @@ impl ProtectionDomain {
     pub fn allocate_with_permissions(
         &self,
         n: usize,
-        access_flags: ffi::ibv_access_flags,
-    ) -> io::Result<MemoryRegion<Vec<u8>>> {
+        access_flags: ibv_access_flags,
+    ) -> io::Result<(Vec<u8>, MemoryRegion)> {
         assert!(n > 0);
-        let data = vec![0; n];
-        self.register_with_permissions(data, access_flags)
+        let mut data = vec![0; n];
+        let data_ptr = data.as_mut_ptr();
+        let data_length = data.len();
+        Ok((
+            data,
+            self.register_with_permissions(data_ptr, data_length, access_flags)?,
+        ))
     }
 
     /// Allocates and registers a Memory Region (MR) associated with this `ProtectionDomain`.
@@ -1743,24 +1742,27 @@ impl ProtectionDomain {
     ///  - `EINVAL`: Invalid access value.
     ///  - `ENOMEM`: Not enough resources (either in operating system or in RDMA device) to
     ///    complete this operation.
-    pub fn allocate(&self, n: usize) -> io::Result<MemoryRegion<Vec<u8>>> {
+    pub fn allocate(&self, n: usize) -> io::Result<(Vec<u8>, MemoryRegion)> {
         let access_flags = DEFAULT_ACCESS_FLAGS;
         self.allocate_with_permissions(n, access_flags)
     }
 
     /// Registers an already allocated Memory Region (MR) with the given access permissions.
-    pub fn register_with_permissions<T: AsMut<[E]>, E: Sized + Copy + Default>(
+    pub fn register_with_permissions(
         &self,
-        mut data: T,
-        access_flags: ffi::ibv_access_flags,
-    ) -> io::Result<MemoryRegion<T>> {
-        let len = std::mem::size_of_val(data.as_mut());
-        assert!(std::mem::size_of::<T>() > 0);
+        ptr: *mut u8,
+        length: usize,
+        access_flags: ibv_access_flags,
+    ) -> io::Result<MemoryRegion> {
+        if length == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "length zero"));
+        }
+
         let mr = unsafe {
             ffi::ibv_reg_mr(
                 self.inner.pd,
-                data.as_mut().as_mut_ptr() as *mut c_void,
-                len,
+                ptr as *mut c_void,
+                length,
                 access_flags.0 as i32,
             )
         };
@@ -1771,17 +1773,13 @@ impl ProtectionDomain {
             Ok(MemoryRegion {
                 _pd: self.inner.clone(),
                 mr,
-                data,
             })
         }
     }
 
     /// Registers an already allocated Memory Region (MR) with the default access permissions.
-    pub fn register<T: AsMut<[E]>, E: Sized + Copy + Default>(
-        &self,
-        data: T,
-    ) -> io::Result<MemoryRegion<T>> {
-        self.register_with_permissions(data, DEFAULT_ACCESS_FLAGS)
+    pub fn register(&self, ptr: *mut u8, length: usize) -> io::Result<MemoryRegion> {
+        self.register_with_permissions(ptr, length, DEFAULT_ACCESS_FLAGS)
     }
 
     /// Registers an already allocated DMA-BUF memory region (MR) associated with this `ProtectionDomain`.
@@ -1797,8 +1795,8 @@ impl ProtectionDomain {
         fd: i32,
         iova: u64,
         len: usize,
-        access_flags: ffi::ibv_access_flags,
-    ) -> io::Result<MemoryRegion<()>> {
+        access_flags: ibv_access_flags,
+    ) -> io::Result<MemoryRegion> {
         let mr = unsafe {
             ffi::ibv_reg_dmabuf_mr(self.inner.pd, 0, len, iova, fd, access_flags.0 as i32)
         };
@@ -1806,11 +1804,9 @@ impl ProtectionDomain {
         if mr.is_null() {
             Err(io::Error::last_os_error())
         } else {
-            // TODO: Add MemoryRegionUnownedOpaque class for return value which doesn't need to store the `data` ptr.
             Ok(MemoryRegion {
                 _pd: self.inner.clone(),
                 mr,
-                data: (),
             })
         }
     }
