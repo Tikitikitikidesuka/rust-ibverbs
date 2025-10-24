@@ -1486,6 +1486,7 @@ impl PreparedQueuePair {
 }
 
 /// A memory region that has been registered for use with RDMA.
+#[derive(Clone)]
 pub struct MemoryRegion {
     _pd: Arc<ProtectionDomainInner>,
     mr: *mut ffi::ibv_mr,
