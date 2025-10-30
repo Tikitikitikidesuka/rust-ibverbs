@@ -1528,6 +1528,12 @@ impl MemoryRegion {
     }
 }
 
+impl Debug for MemoryRegion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MemoryRegion(remote: {:?})", self.remote())
+    }
+}
+
 /// Local memory slice.
 #[derive(Debug, Default, Copy, Clone)]
 #[repr(transparent)]
